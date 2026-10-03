@@ -36,6 +36,9 @@ const HTML_AUDIO_PLAYER = `
     };
 
     p.onplay = () => {
+      if ('mediaSession' in navigator) {
+        navigator.mediaSession.playbackState = 'playing';
+      }
       window.ReactNativeWebView.postMessage(JSON.stringify({
         type: 'state',
         playing: true
@@ -43,15 +46,48 @@ const HTML_AUDIO_PLAYER = `
     };
 
     p.onpause = () => {
+      if ('mediaSession' in navigator) {
+        navigator.mediaSession.playbackState = 'paused';
+      }
       window.ReactNativeWebView.postMessage(JSON.stringify({
         type: 'state',
         playing: false
       }));
     };
 
-    window.playAudio = (url) => {
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.setActionHandler('play', function() {
+        p.play();
+      });
+      navigator.mediaSession.setActionHandler('pause', function() {
+        p.pause();
+      });
+      navigator.mediaSession.setActionHandler('nexttrack', function() {
+        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'next' }));
+      });
+      navigator.mediaSession.setActionHandler('previoustrack', function() {
+        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'previous' }));
+      });
+      navigator.mediaSession.setActionHandler('seekto', function(details) {
+        if (details.seekTime !== undefined) {
+          p.currentTime = details.seekTime;
+        }
+      });
+    }
+
+    window.playAudio = (url, title, artist, album, artwork) => {
       if (p.src !== url) {
         p.src = url;
+      }
+      if ('mediaSession' in navigator && title) {
+        try {
+          navigator.mediaSession.metadata = new MediaMetadata({
+            title: title || 'Music Track',
+            artist: artist || 'Artist',
+            album: album || 'Album',
+            artwork: artwork ? [{ src: artwork, sizes: '512x512', type: 'image/jpeg' }] : []
+          });
+        } catch(e) {}
       }
       p.play().catch(function(e) {
         window.ReactNativeWebView.postMessage(JSON.stringify({
@@ -169,6 +205,10 @@ export const MusicProvider = ({ children }) => {
         }
       } else if (data.type === 'ended') {
         nextSong();
+      } else if (data.type === 'next') {
+        nextSong();
+      } else if (data.type === 'previous') {
+        previousSong();
       } else if (data.type === 'state') {
         setIsPlaying(data.playing);
       }
@@ -183,7 +223,11 @@ export const MusicProvider = ({ children }) => {
 
     if (isMockPlayer) {
       if (webViewRef.current && song.audioUrl) {
-        const js = `window.playAudio('${song.audioUrl}'); true;`;
+        const safeTitle = (song.title || '').replace(/'/g, "\\'");
+        const safeArtist = (song.artist || '').replace(/'/g, "\\'");
+        const safeAlbum = (song.album || '').replace(/'/g, "\\'");
+        const safeArtwork = song.artwork || '';
+        const js = `window.playAudio('${song.audioUrl}', '${safeTitle}', '${safeArtist}', '${safeAlbum}', '${safeArtwork}'); true;`;
         webViewRef.current.injectJavaScript(js);
       }
       return;
@@ -262,7 +306,13 @@ export const MusicProvider = ({ children }) => {
           setIsPlaying(false);
         } else {
           if (currentSong?.audioUrl) {
-            webViewRef.current.injectJavaScript(`window.playAudio('${currentSong.audioUrl}'); true;`);
+            const safeTitle = (currentSong.title || '').replace(/'/g, "\\'");
+            const safeArtist = (currentSong.artist || '').replace(/'/g, "\\'");
+            const safeAlbum = (currentSong.album || '').replace(/'/g, "\\'");
+            const safeArtwork = currentSong.artwork || '';
+            webViewRef.current.injectJavaScript(
+              `window.playAudio('${currentSong.audioUrl}', '${safeTitle}', '${safeArtist}', '${safeAlbum}', '${safeArtwork}'); true;`
+            );
             setIsPlaying(true);
           }
         }
@@ -369,6 +419,7 @@ export const MusicProvider = ({ children }) => {
             allowsInlineMediaPlayback={true}
             onMessage={onWebViewMessage}
             javaScriptEnabled={true}
+            androidLayerType="hardware"
           />
         </View>
       )}
